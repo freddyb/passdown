@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 #encoding: utf-8
 
 from sys import argv, exit
@@ -7,7 +6,7 @@ from sys import argv, exit
 try:
     from scapy.all import sniff, Ether, IP, IPv6, TCP, Raw, hexdump, bind_layers, rdpcap, wrpcap
 except ImportError:
-    print "[E] Could not import scapy, please install scapy first. See INSTALL for instructions on how to do so."
+    print "[E] Could not import scapy, please install scapy first. See README for instructions on how to do so."
     exit(1)
 
 import socket # for root-error bla
@@ -48,20 +47,17 @@ MIMETYPES_VIDEO = ['video/3gpp', 'video/mpeg', 'video/mp4', 'video/quicktime', '
 
 MIMETYPES = MIMETYPES_AUDIO + MIMETYPES_VIDEO
 
-def filter_http(p):
-    """ check i packet suitable for further handling """
-    return repr(p.haslayer(TCP))
-
-
 class Http:
     regex = 'HTTP\/\d\.\d 200 OK'
     name = "HTTP"
-    save_files = ['audio/mpeg', ]
     def __init__(self, s_stream, c_stream):
         header, body = s_stream.split("\r\n\r\n", 1)
         header_fields = header.split("\r\n")
         save = False
         for field in header_fields:
+            """ XXX this block needs tidying
+                let's add support for compressed files
+            """
             m = match('Content-type: (.*)', field, IGNORECASE)
             if m:
                 filetype = m.group(1)
@@ -96,14 +92,14 @@ class Stream:
     """
     def __init__(self, synpacket):
         if (synpacket[TCP].flags != S2F['SYN']): # first packet has to have syn-flag only
-            raise ValueError("SYN DOESSNT SYN")
+            raise ValueError("First packet does not contain SYN")
         self._synpacket = synpacket
         self.clientdata = StringIO()
         self.serverdata = StringIO()
 
     def synack(self, packet):
         if (packet[TCP].flags != S2F['SYNACK']):
-            raise ValueError("SYNACK doesnt SYNACK")
+            raise ValueError("SYNACK packet does not have SYN and ACK set")
         if hasattr(self, '_ack'):
             raise ValueError("We already have an established Handshake. No SYN-ACK accepted")
         self._synack = packet
@@ -246,7 +242,7 @@ if __name__ == '__main__':
         try:
             print "[*] Sniffing on port 8000"
             sniff(filter="tcp and port 80", prn=s.addpacket)
-            # capture infinitely, handle each packet in handle_packet function
+            # capture infinitely, handle each packet in StreamSorting class
         except socket.error, err:
             print "[E] Sniffing requires root privileges, try ``sudo %s''\n[E] Exit." % argv[0]
         except KeyboardInterrupt:
