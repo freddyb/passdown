@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 #encoding: utf-8
 
+# License: some GPL, choose what fits best. non commercial use only
+#
+
 from sys import argv, exit
 
 try:
