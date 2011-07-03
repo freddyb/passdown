@@ -25,7 +25,7 @@ Hacking
 =======
 
 You can hack your own protocol to get files from, by defining a class and
-giving it the properties ``name" and ``regex``. The name should be
+giving it the properties ``name`` and ``regex``. The name should be
 human-readable and the regex should match to the traffic returned from the
 server (i.e. the party that accepts the TCP connection). The constructor of
 your class should accept two parameters: The data streams sent by server
