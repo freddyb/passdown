@@ -39,6 +39,7 @@ Known Bugs / TODO
 * TCP packets are not reordered.
 * Retransmissions are not handled
 * FIN-Handling is a little wrong
+* CPU load is a little high
 * We sometimes get I/O Errors on our streams
 * RST packets are currently unknown to passdown
 * No real option/parameter handling, verbosity switches would be nice
