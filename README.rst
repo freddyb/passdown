@@ -29,7 +29,9 @@ giving it the properties ``name`` and ``regex``. The name should be
 human-readable and the regex should match to the traffic returned from the
 server (i.e. the party that accepts the TCP connection). The constructor of
 your class should accept two parameters: The data streams sent by server
-and client (in that order).
+and client (in that order). You can then put the classname in the PROTOCOLS
+array. Note that you will have to adjust the filter applied to the ``sniff``
+call, unless your protocol runs on tcp port 80 as well ;)
 
 Known Bugs / TODO
 =================
