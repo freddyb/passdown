@@ -77,13 +77,15 @@ class Http:
         # e.g. output/audio_20110703_20-03_stream.php
         while exists(fname):
             fname += '1' # append 1 if file exists :D
+
         file(fname, 'wb').write(body)
         print "Written to", fname
 
     def getfilename(self, c_stream):
         req = c_stream.split("\r\n")[0]
         method, path, version = req.split()
-        return path.split("/")[-1]
+        fname = path.split("/")[-1].split("?")[0] # discard parameters
+        return fname[:80] # only first 80 chars
 
 PROTOCOLS = [Http]
 
@@ -139,14 +141,15 @@ class Stream:
         pass
 
     def finack(self, packet):
+        """ We expect a FIN-Packet from *both* parties.
+            fitsinto for client->server is 1 and server->client is 2
+            ORing the both values to the current status means that we need each
+            direction has to be present for it to be 3. Pretty cool, huh?
+        """
         if not hasattr(self, '_finstatus'):
             self._finstatus = self.fitsinto(packet)
         elif self._finstatus == 1 or self._finstatus == 2:
-            self._finstatus += self.fitsinto(packet)
-        else:
-            #raise ValueError("wrong FIN packets?!?!")
-            pass
-            # two FIN,ACK from same direction
+            self._finstatus |= self.fitsinto(packet)
         if self._finstatus == 3:
             self.end()
 
