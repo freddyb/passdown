@@ -7,7 +7,7 @@
 from sys import argv, exit
 
 try:
-    from scapy.all import sniff, Ether, IP, IPv6, TCP, Raw, hexdump, bind_layers, rdpcap, wrpcap
+    from scapy.all import sniff, Packet, Ether, IP, IPv6, TCP, Raw, hexdump, bind_layers, rdpcap, wrpcap
 except ImportError:
     print "[E] Could not import scapy, please install scapy first. See README for instructions on how to do so."
     exit(1)
@@ -39,16 +39,32 @@ TCP Flags:
   .... .... ..0. = Syn (SYN)
   .... .... ...0 = Fin (FIN)
 """
-# String to Flag
-S2F = {'FIN' : 0x1, 'SYN' : 0x2, 'ACK' : 0x10, 'RST' : 0x4,' PSH' : 0x8, 'SYNACK' : 0x12, 'PSHACK': 0x18, 'FINACK' : 0x11, 'FINPSHACK': 0x19}
 
-# Flag to String
-F2S = dict((v, k) for k, v in S2F.iteritems())
+FIN=0x1
+SYN=0x2
+RST=0x4
+PSH=0x8
+ACK=0x10
+
 
 MIMETYPES_AUDIO = ['audio/flac', 'audio/mp4a-latm', 'audio/mpa-robust', 'audio/mpeg', 'audio/mpegurl', 'audio/ogg', 'audio/x-aiff', 'audio/x-gsm', 'audio/x-ms-wma', 'audio/x-ms-wax', 'audio/x-pn-realaudio-plugin', 'audio/x-pn-realaudio', 'audio/x-realaudio', 'audio/x-wav', 'application/ogg']
 MIMETYPES_VIDEO = ['video/3gpp', 'video/mpeg', 'video/mp4', 'video/quicktime', 'video/ogg', 'video/webm', 'video/x-flv', 'video/x-la-asf', 'video/x-ms-asf', 'video/x-ms-wm', 'video/x-ms-wmv', 'video/x-ms-wmx', 'video/x-ms-wvx', 'video/x-msvideo', 'video/x-matroska']
 
 MIMETYPES = MIMETYPES_AUDIO + MIMETYPES_VIDEO
+
+def hasflag(inp, flag):
+    """ check if given input (bitmask, flag) has specific flag set
+        e.g. hasflag(SYN|ACK,ACK) -> True.
+    """
+    if isinstance(inp, int):
+        return bitmask & flag == flag
+    elif isinstance(inp, Packet):
+        if inp.haslayer(TCP):
+            return inp[TCP].flags & flag == flag
+        else:
+            raise ValueError("Cannot get flags for" + inp.summary())
+            # should we just return False here? dunno :<
+
 
 class Http:
     regex = 'HTTP\/\d\.\d 200 OK'
@@ -90,27 +106,23 @@ class Http:
 PROTOCOLS = [Http]
 
 class Stream:
-    """
-    SYN
-    SYNACK
-    ACK
-    """
+    """ Handshake: SYN, SYNACK, ACK """
     def __init__(self, synpacket):
-        if (synpacket[TCP].flags != S2F['SYN']): # first packet has to have syn-flag only
+        if not hasflag(synpacket, SYN): # first packet has to have syn-flag only
             raise ValueError("First packet does not contain SYN")
         self._synpacket = synpacket
         self.clientdata = StringIO()
         self.serverdata = StringIO()
 
     def synack(self, packet):
-        if (packet[TCP].flags != S2F['SYNACK']):
+        if not hasflag(packet, (SYN|ACK)):
             raise ValueError("SYNACK packet does not have SYN and ACK set")
         if hasattr(self, '_ack'):
             raise ValueError("We already have an established Handshake. No SYN-ACK accepted")
         self._synack = packet
 
     def ack(self, packet):
-        if (packet[TCP].flags != S2F['ACK']):
+        if not hasflag(packet, ACK):
             raise ValueError("Ack Packet does not say 'ACK'")
         if not hasattr(self, '_synack'):
             raise ValueError("We dont have SYNACK yet. Why ACKing?")
@@ -157,17 +169,17 @@ class Stream:
         if not isdir('output'):
             mkdir('output')
         #XXX use tempfile.mkstemp
-        fname_c = 'output/client_%s-%s_port%s.dat' % (self._synpacket.src, self._synpacket.dst, self._synpacket.dport)
-        while exists(fname_c):
-            fname_c += '1'
-        with open(fname_c, 'wb') as f:
-            f.write(self.clientdata.getvalue())
+        #fname_c = 'output/client_%s-%s_port%s.dat' % (self._synpacket.src, self._synpacket.dst, self._synpacket.dport)
+        #while exists(fname_c):
+        #    fname_c += '1'
+        #with open(fname_c, 'wb') as f:
+        #    f.write(self.clientdata.getvalue())
 
-        fname_s = 'output/server_%s-%s_port%s.dat' % (self._synpacket.dst, self._synpacket.src, self._synpacket.dport)
-        while exists(fname_s):
-            fname_s += '1'
-        with open(fname_s, 'wb') as f:
-            f.write(self.serverdata.getvalue())
+        #fname_s = 'output/server_%s-%s_port%s.dat' % (self._synpacket.dst, self._synpacket.src, self._synpacket.dport)
+        #while exists(fname_s):
+        #    fname_s += '1'
+        #with open(fname_s, 'wb') as f:
+        #    f.write(self.serverdata.getvalue())
 
         for protocol in PROTOCOLS:
             if match(protocol.regex, self.serverdata.getvalue()):
@@ -176,19 +188,17 @@ class Stream:
                 protocol(self.serverdata.getvalue(), self.clientdata.getvalue())
         self.clientdata.close()
         self.serverdata.close()
-        print "Wrote to %s and %s" % (fname_c, fname_s)
+        #print "Wrote to %s and %s" % (fname_c, fname_s)
 
 
 
 class StreamSorting:
-    """
-    called for each packet
-    """
     def __init__(self):
         self.num = 0
         self.streams = []
         self.packets = []
     def addpacket(self, p):
+        """ called for each packet """
         self.packets.append(p)
         self.num += 1
         if p.haslayer(Ether):
@@ -198,16 +208,16 @@ class StreamSorting:
                 p = p[IPv6] # ..
         if not p.haslayer(TCP):
             return
-        print "[%s] %s" % (self.num, p.summary()), #"|| Flags:", p[TCP].flags,
-        if p[TCP].flags == S2F['SYN']:
+        #print "[%s] %s" % (self.num, p.summary()), #"|| Flags:", p[TCP].flags,
+        if hasflag(p, SYN) and not hasflag(p, ACK): #SYN gesetzt, aber ACK nicht.
             self.streams.append( Stream(p) )
             print "<<NewStream>>",
-        elif p[TCP].flags == S2F['SYNACK']:
+        elif hasflag(p, (SYN|ACK)): # SYN und ACK gesetzt
             for stream in self.streams:
                 if stream.fitsinto(p) and not hasattr(stream, '_synack'):
                     stream.synack(p)
                     print "<<StreamUpdate>>",
-        elif p[TCP].flags == S2F['ACK']:
+        elif hasflag(p, ACK) and not hasflag(p, SYN): # ACK gesetzt. SYN nicht.
             for stream in self.streams:
                 if stream.fitsinto(p) and not hasattr(stream, '_ack'):
                     stream.ack(p)
@@ -221,11 +231,13 @@ class StreamSorting:
             for stream in self.streams:
                 if stream.fitsinto(p) and stream.established:
                     stream.add_data(p)
-        if p[TCP].flags == S2F['FINACK'] or p[TCP].flags == S2F['FINPSHACK']:
+        if hasflag(p, (FIN|ACK)): #FIN und ACK gesetzt
             for stream in self.streams:
                 if stream.fitsinto(p) and stream.established:
                     stream.finack(p)
-        print # end line
+        #print # end line
+
+
 
 
 def usage():
