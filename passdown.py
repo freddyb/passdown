@@ -2,9 +2,14 @@
 #encoding: utf-8
 
 # License: some GPL, choose what fits best. non commercial use only
-#
+########
 
-from sys import argv, exit
+
+
+# Imports
+###############################################################################
+from sys import argv, exit, path
+path.append("modules/") #XXX could we do this in a cooler way to import modules? :)
 
 try:
     from scapy.all import sniff, Packet, Ether, IP, IPv6, TCP, Raw, hexdump, bind_layers, rdpcap, wrpcap
@@ -12,11 +17,13 @@ except ImportError:
     print "[E] Could not import scapy, please install scapy first. See README for instructions on how to do so."
     exit(1)
 
+
 import socket # for root-error bla
-from re import match, IGNORECASE # HTTPStream
+from re import match, IGNORECASE # module-finder
 
 from os import mkdir
 from os.path import isdir, exists
+
 
 from time import strftime # for filenames
 
@@ -25,6 +32,12 @@ try:
 except ImportError:
     from StringIO import StringIO
 
+from http import Http #  das hier dynamisch wär cooler
+PROTOCOLS = [Http]
+
+
+# Main stuff
+############################################################################
 
 """
 TCP Flags:
@@ -46,18 +59,12 @@ RST=0x4
 PSH=0x8
 ACK=0x10
 
-
-MIMETYPES_AUDIO = ['audio/flac', 'audio/mp4a-latm', 'audio/mpa-robust', 'audio/mpeg', 'audio/mpegurl', 'audio/ogg', 'audio/x-aiff', 'audio/x-gsm', 'audio/x-ms-wma', 'audio/x-ms-wax', 'audio/x-pn-realaudio-plugin', 'audio/x-pn-realaudio', 'audio/x-realaudio', 'audio/x-wav', 'application/ogg']
-MIMETYPES_VIDEO = ['video/3gpp', 'video/mpeg', 'video/mp4', 'video/quicktime', 'video/ogg', 'video/webm', 'video/x-flv', 'video/x-la-asf', 'video/x-ms-asf', 'video/x-ms-wm', 'video/x-ms-wmv', 'video/x-ms-wmx', 'video/x-ms-wvx', 'video/x-msvideo', 'video/x-matroska']
-
-MIMETYPES = MIMETYPES_AUDIO + MIMETYPES_VIDEO
-
 def hasflag(inp, flag):
-    """ check if given input (bitmask, flag) has specific flag set
+    """ check if given input (bitmask as int, tcp packet) has specific flag set
         e.g. hasflag(SYN|ACK,ACK) -> True.
     """
     if isinstance(inp, int):
-        return bitmask & flag == flag
+        return inp & flag == flag
     elif isinstance(inp, Packet):
         if inp.haslayer(TCP):
             return inp[TCP].flags & flag == flag
@@ -65,50 +72,15 @@ def hasflag(inp, flag):
             raise ValueError("Cannot get flags for" + inp.summary())
             # should we just return False here? dunno :<
 
-
-class Http:
-    regex = 'HTTP\/\d\.\d 200 OK'
-    name = "HTTP"
-    def __init__(self, s_stream, c_stream):
-        header, body = s_stream.split("\r\n\r\n", 1)
-        header_fields = header.split("\r\n")
-        save = False
-        for field in header_fields:
-            """ XXX this block needs tidying
-                let's add support for compressed files
-            """
-            m = match('Content-type: (.*)', field, IGNORECASE)
-            if m:
-                filetype = m.group(1)
-                if ';' in filetype:
-                    filetype = filetype.split(";")[0].strip()
-                    # case: Content-Type: audio/mpeg;charset=UTF-8
-                if filetype in MIMETYPES:
-                    save = True
-        if save:
-            self.savefile(body, filetype, c_stream)
-
-    def savefile(self, body, filetype, c_stream):
-        fname = 'output/%s_%s_%s' % (filetype.split("/")[0], strftime('%Y%m%d_%H-%M'),  self.getfilename(c_stream))
-        # e.g. output/audio_20110703_20-03_stream.php
-        while exists(fname):
-            fname += '1' # append 1 if file exists :D
-
-        file(fname, 'wb').write(body)
-        print "Written to", fname
-
-    def getfilename(self, c_stream):
-        req = c_stream.split("\r\n")[0]
-        method, path, version = req.split()
-        fname = path.split("/")[-1].split("?")[0] # discard parameters
-        return fname[:80] # only first 80 chars
-
-PROTOCOLS = [Http]
-
 class Stream:
-    """ Handshake: SYN, SYNACK, ACK """
+    """ Stream object combines TCP packets to a single stream(!) of data sent
+        by client and server
+    """
     def __init__(self, synpacket):
-        if not hasflag(synpacket, SYN): # first packet has to have syn-flag only
+        if not hasflag(synpacket, SYN):
+            # first packet has to have syn-flag only
+            # we only check if synflag is generally set.
+            # instead we should check if flags == SYN
             raise ValueError("First packet does not contain SYN")
         self._synpacket = synpacket
         self.clientdata = StringIO()
@@ -183,8 +155,7 @@ class Stream:
 
         for protocol in PROTOCOLS:
             if match(protocol.regex, self.serverdata.getvalue()):
-                print
-                print "[*] Known Protocol detected:", protocol.name
+                print "[*] Known protocol detected:", protocol.name
                 protocol(self.serverdata.getvalue(), self.clientdata.getvalue())
         self.clientdata.close()
         self.serverdata.close()
@@ -210,18 +181,19 @@ class StreamSorting:
             return
         #print "[%s] %s" % (self.num, p.summary()), #"|| Flags:", p[TCP].flags,
         if hasflag(p, SYN) and not hasflag(p, ACK): #SYN gesetzt, aber ACK nicht.
+            # falsch. sollten prüfen ob NUR syn gesetzt ist.
             self.streams.append( Stream(p) )
-            print "<<NewStream>>",
+            #print "<<NewStream>>",
         elif hasflag(p, (SYN|ACK)): # SYN und ACK gesetzt
             for stream in self.streams:
                 if stream.fitsinto(p) and not hasattr(stream, '_synack'):
                     stream.synack(p)
-                    print "<<StreamUpdate>>",
+                    #print "<<StreamUpdate>>",
         elif hasflag(p, ACK) and not hasflag(p, SYN): # ACK gesetzt. SYN nicht.
             for stream in self.streams:
                 if stream.fitsinto(p) and not hasattr(stream, '_ack'):
                     stream.ack(p)
-                    print "<<StreamUpdated: Handshake Complete>>",
+                    #print "<<StreamUpdated: Handshake Complete>>",
         #elif p[TCP].flags == S2F['PSHACK']:
         #    for stream in self.streams:
         #        if stream.fitsinto(p) and stream.established:
@@ -258,7 +230,7 @@ if __name__ == '__main__':
             exit(1)
     elif len(argv) == 1:
         try:
-            print "[*] Sniffing on port 8000"
+            print "[*] Sniffing on port 80"
             sniff(filter="tcp and port 80", prn=s.addpacket)
             # capture infinitely, handle each packet in StreamSorting class
         except socket.error, err:
