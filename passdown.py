@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 #encoding: utf-8
 
-# License: some GPL, choose what fits best. non commercial use only
+# License: any version of the currently available GNU General Public License,
+#          choose which fits best. non commercial use only
 ########
 
 
@@ -26,6 +27,8 @@ from os.path import isdir, exists
 
 
 from time import strftime # for filenames
+
+import logging
 
 try:
     from cStringIO import StringIO
@@ -155,7 +158,7 @@ class Stream:
 
         for protocol in PROTOCOLS:
             if match(protocol.regex, self.serverdata.getvalue()):
-                print "[*] Known protocol detected:", protocol.name
+                logging.debug("Known protocol detected: "+ protocol.name)
                 protocol(self.serverdata.getvalue(), self.clientdata.getvalue())
         self.clientdata.close()
         self.serverdata.close()
@@ -179,21 +182,21 @@ class StreamSorting:
                 p = p[IPv6] # ..
         if not p.haslayer(TCP):
             return
-        #print "[%s] %s" % (self.num, p.summary()), #"|| Flags:", p[TCP].flags,
+        logging.debug("[%s] %s" % (self.num, p.summary()))  #"|| Flags:", p[TCP].flags
         if hasflag(p, SYN) and not hasflag(p, ACK): #SYN gesetzt, aber ACK nicht.
             # falsch. sollten prüfen ob NUR syn gesetzt ist.
             self.streams.append( Stream(p) )
-            #print "<<NewStream>>",
+            logging.debug("<<NewStream>>")
         elif hasflag(p, (SYN|ACK)): # SYN und ACK gesetzt
             for stream in self.streams:
                 if stream.fitsinto(p) and not hasattr(stream, '_synack'):
                     stream.synack(p)
-                    #print "<<StreamUpdate>>",
+                    logging.debug("<<StreamUpdate>>")
         elif hasflag(p, ACK) and not hasflag(p, SYN): # ACK gesetzt. SYN nicht.
             for stream in self.streams:
                 if stream.fitsinto(p) and not hasattr(stream, '_ack'):
                     stream.ack(p)
-                    #print "<<StreamUpdated: Handshake Complete>>",
+                    logging.debug("<<StreamUpdated: Handshake Complete>>")
         #elif p[TCP].flags == S2F['PSHACK']:
         #    for stream in self.streams:
         #        if stream.fitsinto(p) and stream.established:
@@ -207,39 +210,45 @@ class StreamSorting:
             for stream in self.streams:
                 if stream.fitsinto(p) and stream.established:
                     stream.finack(p)
-        #print # end line
 
 
 
 
 def usage():
-    print "usage: ./%s [file]\nSniff for tcp-packets on port 8000 (requires root)\n\nfile\tRead packets from file instead of sniffing." % argv[0]
+    print "usage: %s [file]\nSniff for tcp-packets on port 80 (requires root)\n\nfile\tRead packets from file instead of sniffing.\n" % argv[0]
 
 
 if __name__ == '__main__':
     s = StreamSorting()
+    if '-d' in argv:
+        # lame option handling
+        del(argv[argv.index('-d') ])
+        logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.DEBUG)
+    else:
+        logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+
     if len(argv) == 2:
-        print "[*] Reading packets from", argv[1]
+        logging.info("Reading packets from "+ argv[1])
         try:
             packets = rdpcap(argv[1])
-            print "[*] %s Packets" % len(packets)
+            logging.info("%s Packets" % len(packets))
             for packet in packets:
                 s.addpacket(packet)
         except Exception, err:
-            print err
+            logging.error(err)
             exit(1)
     elif len(argv) == 1:
         try:
-            print "[*] Sniffing on port 80"
+            logging.info("Sniffing on port 80")
             sniff(filter="tcp and port 80", prn=s.addpacket)
             # capture infinitely, handle each packet in StreamSorting class
         except socket.error, err:
-            print "[E] Sniffing requires root privileges, try ``sudo %s''\n[E] Exit." % argv[0]
+            logging.error("Sniffing requires root privileges, try ``sudo %s''" % argv[0])
+            logging.error("Exit.")
         except KeyboardInterrupt:
-            print
-            print "Had %s packets sniffed when called for exit" % len(s.packets)
+            logging.error("Had %s packets sniffed when called for exit" % len(s.packets))
             fname = strftime('%Y%m%d_%H-%M') + '.cap'
-            print "Writing to %s" % fname
+            logging.error("Writing to %s" % fname)
             wrpcap(fname, s.packets)
             exit(1)
     else:

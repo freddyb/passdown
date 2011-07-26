@@ -7,6 +7,7 @@ MIMETYPES = MIMETYPES_AUDIO + MIMETYPES_VIDEO
 from re import match, IGNORECASE
 from time import strftime # for filenames
 from os.path import isdir, exists # dito
+import logging
 
 class Http:
     regex = 'HTTP\/\d\.\d 200 OK'
@@ -37,7 +38,7 @@ class Http:
             fname += '1' # append 1 if file exists :D
 
         file(fname, 'wb').write(body)
-        print "Written to", fname
+        logging.info("Http: Written %s file to %s" % (filetype, fname))
 
     def getfilename(self, c_stream):
         req = c_stream.split("\r\n")[0]
